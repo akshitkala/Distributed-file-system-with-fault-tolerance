@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DFS Dashboard</title>
+<style>
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background-color: #0d1117;
+    color: #e6edf3;
+    margin: 0;
+    padding: 0;
+  }
+  h1 {
+    text-align: center;
+    color: #58a6ff;
+    padding: 20px;
+    margin: 0;
+    background-color: #161b22;
+    box-shadow: 0 2px 10px rgba(88,166,255,0.2);
+  }
+  .section {
+    background: #161b22;
+    padding: 25px;
+    margin: 20px auto;
+    border-radius: 10px;
+    width: 85%;
+    max-width: 900px;
+    box-shadow: 0 0 15px rgba(56,139,253,0.2);
+  }
+  h2 {
+    text-align: center;
+    color: #79c0ff;
+  }
+  button {
+    background-color: #238636;
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    margin: 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: 0.3s;
+  }
+  button:disabled {
+    background-color: #30363d;
+    cursor: not-allowed;
+  }
+  button:hover:enabled {
+    background-color: #2ea043;
+  }
+  input[type="file"] {
+    background: #0d1117;
+    color: white;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 8px;
+  }
+  ul {
+    list-style: none;
+    padding: 0;
+  }
+  li {
+    background-color: #21262d;
+    margin: 6px 0;
+    padding: 10px;
+    border-radius: 6px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+  }
+  li.selected {
+    border: 2px solid #58a6ff;
+    background-color: #1e2630;
+  }
+  .alive { color: #3fb950; font-weight: bold; }
+  .dead { color: #f85149; font-weight: bold; }
+  .footer {
+    text-align: center;
+    color: #8b949e;
+    margin-top: 40px;
+  }
+  .btn-group {
+    text-align: center;
+    margin-top: 10px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+    background: #1c1f24;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  th, td {
+    padding: 10px;
+    border-bottom: 1px solid #30363d;
+    text-align: center;
+  }
+  th {
+    background-color: #21262d;
+    color: #58a6ff;
+  }
+</style>
+</head>
+<body>
+  <h1>📁 Distributed File System Dashboard</h1>
+
+  <div class="section">
+    <h2>📤 Upload File</h2>
+    <input type="file" id="fileInput" />
+    <button onclick="uploadFile()">Upload</button>
+  </div>
+
+  <div class="section">
+    <h2>🧱 Nodes</h2>
+    <div class="btn-group">
+      <button onclick="addNode()">Add Node</button>
+      <button id="btnDeleteNode" onclick="deleteNode()" disabled>Delete Node</button>
+      <button id="btnToggleNode" onclick="toggleNode()" disabled>Toggle Fail/Recover</button>
+    </div>
+    <ul id="nodesList">Loading...</ul>
+  </div>
+
+  <div class="section">
+    <h2>📦 Files</h2>
+    <div class="btn-group">
+      <button id="btnVerify" onclick="verifyFile()" disabled>Verify</button>
+      <button id="btnDownload" onclick="downloadFile()" disabled>Download</button>
+      <button id="btnDeleteFile" onclick="deleteFile()" disabled>🗑️ Delete</button>
+    </div>
+    <ul id="filesList">Loading...</ul>
+    <div id="chunkInfo"></div>
+  </div>
+
+  <p class="footer">⚙️ DFS with Fault Tolerance — Built with FastAPI</p>
+
+<script>
+  const API = window.location.origin;
+  let selectedNode = null;
+  let selectedFile = null;
+
+  async function uploadFile() {
+    const file = document.getElementById("fileInput").files[0];
+    if (!file) return alert("Select a file first!");
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${API}/upload`, { method: "POST", body: fd });
+    const data = await res.json();
+    alert(res.ok ? `✅ Uploaded: ${data.file_id}` : `❌ Error: ${data.detail}`);
+    getStatus();
+  }
+
+  async function getStatus() {
+    const res = await fetch(`${API}/status`);
+    const data = await res.json();
+
+    // Nodes
+    const nl = document.getElementById("nodesList");
+    nl.innerHTML = "";
+    Object.entries(data.nodes).forEach(([id, n]) => {
+      const li = document.createElement("li");
+      li.innerHTML = `<strong>${id}</strong> → ${n.path} [<span class="${n.alive ? "alive":"dead"}">${n.alive?"alive":"dead"}</span>]`;
+      li.onclick = () => selectNode(li, id);
+      nl.appendChild(li);
+    });
+
+    // Unique files (no duplicates)
+    const uniqueFiles = [...new Set(data.files)];
+    const fl = document.getElementById("filesList");
+    fl.innerHTML = "";
+    uniqueFiles.forEach((f) => {
+      const li = document.createElement("li");
+      li.textContent = f;
+      li.onclick = () => selectFile(li, f);
+      fl.appendChild(li);
+    });
+
+    clearSelection();
+  }
+
+  function clearSelection() {
+    document.getElementById("btnDeleteNode").disabled = true;
+    document.getElementById("btnToggleNode").disabled = true;
+    document.getElementById("btnVerify").disabled = true;
+    document.getElementById("btnDownload").disabled = true;
+    document.getElementById("btnDeleteFile").disabled = true;
+    selectedNode = null;
+    selectedFile = null;
+    document.getElementById("chunkInfo").innerHTML = "";
+  }
+
+  function selectNode(li, id) {
+    document.querySelectorAll("#nodesList li").forEach(li => li.classList.remove("selected"));
+    li.classList.add("selected");
+    selectedNode = id;
+    document.getElementById("btnDeleteNode").disabled = false;
+    document.getElementById("btnToggleNode").disabled = false;
+  }
+
+  async function selectFile(li, fileId) {
+    document.querySelectorAll("#filesList li").forEach(li => li.classList.remove("selected"));
+    li.classList.add("selected");
+    selectedFile = fileId;
+    document.getElementById("btnVerify").disabled = false;
+    document.getElementById("btnDownload").disabled = false;
+    document.getElementById("btnDeleteFile").disabled = false;
+    await showFileChunks(fileId);
+  }
+
+  async function addNode() {
+    const res = await fetch(`${API}/add_node`, { method: "POST" });
+    const data = await res.json();
+    alert(`✅ Added node: ${data.node_id}`);
+    getStatus();
+  }
+
+  async function deleteNode() {
+    if (!selectedNode) return alert("Select a node first!");
+    const res = await fetch(`${API}/remove_node/${selectedNode}`, { method: "DELETE" });
+    const data = await res.json();
+    alert(res.ok ? `🗑️ Node ${data.node_id} deleted` : `❌ ${data.detail}`);
+    getStatus();
+  }
+
+  async function toggleNode() {
+    if (!selectedNode) return alert("Select a node first!");
+    const res = await fetch(`${API}/toggle_node/${selectedNode}`, { method: "POST" });
+    const data = await res.json();
+    alert(`Node ${data.node_id} is now ${data.alive ? "alive":"dead"}`);
+    getStatus();
+  }
+
+  async function verifyFile() {
+    if (!selectedFile) return alert("Select a file first!");
+    const res = await fetch(`${API}/verify?file_id=${selectedFile}`);
+    const data = await res.json();
+    alert(data.healthy ? "✅ File is healthy" : "⚠️ File has missing/corrupt chunks");
+  }
+
+  async function downloadFile() {
+    if (!selectedFile) return alert("Select a file first!");
+    const res = await fetch(`${API}/download?file_id=${selectedFile}`);
+    if (res.ok) {
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = selectedFile + ".download";
+      a.click();
+      alert("📥 File downloaded successfully!");
+    } else {
+      alert("❌ Download failed!");
+    }
+  }
+
+  async function deleteFile() {
+    if (!selectedFile) return alert("Select a file first!");
+    if (!confirm("🗑️ Delete this file permanently?")) return;
+    const res = await fetch(`${API}/delete_file/${selectedFile}`, { method: "DELETE" });
+    const data = await res.json();
+    alert(res.ok ? `File ${data.file_id} deleted.` : `❌ ${data.detail}`);
+    getStatus();
+  }
+
+  async function showFileChunks(fileId) {
+    const res = await fetch(`${API}/file_info/${fileId}`);
+    const data = await res.json();
+    const infoDiv = document.getElementById("chunkInfo");
+
+    let html = `
+      <h3>🧩 Chunk Mapping for: ${data.file_name}</h3>
+      <table>
+        <tr><th>Chunk #</th><th>Checksum</th><th>Stored On Nodes</th></tr>
+    `;
+    for (const [idx, chunk] of Object.entries(data.chunks)) {
+      const shortChecksum = chunk.checksum.slice(0, 12) + "...";
+      html += `<tr><td>${idx}</td><td>${shortChecksum}</td><td>${chunk.replicas.join(", ")}</td></tr>`;
+    }
+    html += "</table>";
+    infoDiv.innerHTML = html;
+  }
+
+  window.onload = getStatus;
+</script>
+</body>
+</html>
